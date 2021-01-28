@@ -24,6 +24,7 @@ import java.util.*;
 import java.util.concurrent.CancellationException;
 
 import com.google.android.gms.nearby.exposurenotification.TemporaryExposureKey;
+import com.google.android.gms.tasks.OnSuccessListener;
 
 import org.dpppt.android.sdk.backend.ResponseCallback;
 import org.dpppt.android.sdk.backend.UserAgentInterceptor;
@@ -35,6 +36,7 @@ import org.dpppt.android.sdk.internal.backend.models.GaenRequest;
 import org.dpppt.android.sdk.internal.history.HistoryDatabase;
 import org.dpppt.android.sdk.internal.history.HistoryEntry;
 import org.dpppt.android.sdk.internal.history.HistoryEntryType;
+import org.dpppt.android.sdk.internal.hms.ContactShieldWrapper;
 import org.dpppt.android.sdk.internal.logger.Logger;
 import org.dpppt.android.sdk.internal.nearby.GaenStateCache;
 import org.dpppt.android.sdk.internal.nearby.GaenStateHelper;
@@ -50,6 +52,9 @@ import org.dpppt.android.sdk.models.ExposureDay;
 import org.dpppt.android.sdk.util.DateUtil;
 
 import okhttp3.CertificatePinner;
+
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isGMS;
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isHMS;
 
 public class DP3T {
 
@@ -133,18 +138,34 @@ public class DP3T {
 			Runnable cancelledCallback) {
 		pendingStartCallbacks = new PendingStartCallbacks(successCallback, errorCallback, cancelledCallback);
 
-		GoogleExposureClient googleExposureClient = GoogleExposureClient.getInstance(activity);
-		googleExposureClient.start(activity, REQUEST_CODE_START_CONFIRMATION,
-				() -> {
-					resetStartCallbacks();
-					GaenStateCache.setGaenEnabled(true, null, activity);
-					startInternal(activity);
-					successCallback.run();
-				},
-				e -> {
-					resetStartCallbacks();
-					errorCallback.accept(e);
-				});
+		if(isGMS(activity)) {
+			GoogleExposureClient googleExposureClient = GoogleExposureClient.getInstance(activity);
+			googleExposureClient.start(activity, REQUEST_CODE_START_CONFIRMATION,
+					() -> {
+						resetStartCallbacks();
+						GaenStateCache.setGaenEnabled(true, null, activity);
+						startInternal(activity);
+						successCallback.run();
+					},
+					e -> {
+						resetStartCallbacks();
+						errorCallback.accept(e);
+					});
+		}else if(isHMS(activity)){
+			ContactShieldWrapper contactShieldWrapper = ContactShieldWrapper.getInstance(activity);
+			contactShieldWrapper.start(activity, REQUEST_CODE_START_CONFIRMATION,
+					() -> {
+						resetStartCallbacks();
+						GaenStateCache.setGaenEnabled(true, null, activity);
+						startInternal(activity);
+						successCallback.run();
+					},
+					e -> {
+						resetStartCallbacks();
+						errorCallback.accept(e);
+					});
+		}
+
 	}
 
 	private static void resetStartCallbacks() {
@@ -247,58 +268,65 @@ public class DP3T {
 			throw new IllegalStateException("pendingIAmInfectedRequest must be set before calling executeIAmInfected()");
 		}
 		DayDate onsetDate = new DayDate(pendingIAmInfectedRequest.onset.getTime());
+		OnSuccessListener<List<TemporaryExposureKey>> successCallback = temporaryExposureKeys -> {
+			List<TemporaryExposureKey> filteredKeys = new ArrayList<>();
+			int delayedKeyDate = DateUtil.getCurrentRollingStartNumber();
+			boolean delayedKeyAlreadyPresent = false;
+			for (TemporaryExposureKey temporaryExposureKey : temporaryExposureKeys) {
+				if (temporaryExposureKey.getRollingStartIntervalNumber() >=
+						DateUtil.getRollingStartNumberForDate(onsetDate)) {
+					filteredKeys.add(temporaryExposureKey);
+					if (temporaryExposureKey.getRollingStartIntervalNumber() == delayedKeyDate) {
+						delayedKeyAlreadyPresent = true;
+					}
+				}
+			}
+			GaenRequest exposeeListRequest = new GaenRequest(filteredKeys, delayedKeyDate);
 
-		GoogleExposureClient.getInstance(activity)
-				.getTemporaryExposureKeyHistory(activity, REQUEST_CODE_EXPORT_KEYS,
-						temporaryExposureKeys -> {
-							List<TemporaryExposureKey> filteredKeys = new ArrayList<>();
-							int delayedKeyDate = DateUtil.getCurrentRollingStartNumber();
-							boolean delayedKeyAlreadyPresent = false;
-							for (TemporaryExposureKey temporaryExposureKey : temporaryExposureKeys) {
-								if (temporaryExposureKey.getRollingStartIntervalNumber() >=
-										DateUtil.getRollingStartNumberForDate(onsetDate)) {
-									filteredKeys.add(temporaryExposureKey);
-									if (temporaryExposureKey.getRollingStartIntervalNumber() == delayedKeyDate) {
-										delayedKeyAlreadyPresent = true;
+			AppConfigManager appConfigManager = AppConfigManager.getInstance(activity);
+			try {
+				boolean finalDelayedKeyAlreadyPresent = delayedKeyAlreadyPresent;
+				appConfigManager.getBackendReportRepository(activity)
+						.addGaenExposee(exposeeListRequest, pendingIAmInfectedRequest.exposeeAuthMethod,
+								new ResponseCallback<String>() {
+									@Override
+									public void onSuccess(String authToken) {
+										//if the currentDay key was already released (because of same day TEK
+										// release) we do a fake request the next day, otherwise we upload todays
+										// key tomorrow
+										PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken,
+												finalDelayedKeyAlreadyPresent ? 1 : 0);
+										PendingKeyUploadStorage.getInstance(activity).addPendingKey(delayedKey);
+										appConfigManager.setIAmInfected(true);
+										if (finalDelayedKeyAlreadyPresent) {
+											DP3T.stop(activity);
+											appConfigManager.setIAmInfectedIsResettable(true);
+										}
+										pendingIAmInfectedRequest.callback.onSuccess(null);
+										pendingIAmInfectedRequest = null;
 									}
-								}
-							}
-							GaenRequest exposeeListRequest = new GaenRequest(filteredKeys, delayedKeyDate);
 
-							AppConfigManager appConfigManager = AppConfigManager.getInstance(activity);
-							try {
-								boolean finalDelayedKeyAlreadyPresent = delayedKeyAlreadyPresent;
-								appConfigManager.getBackendReportRepository(activity)
-										.addGaenExposee(exposeeListRequest, pendingIAmInfectedRequest.exposeeAuthMethod,
-												new ResponseCallback<String>() {
-													@Override
-													public void onSuccess(String authToken) {
-														//if the currentDay key was already released (because of same day TEK
-														// release) we do a fake request the next day, otherwise we upload todays
-														// key tomorrow
-														PendingKey delayedKey = new PendingKey(delayedKeyDate, authToken,
-																finalDelayedKeyAlreadyPresent ? 1 : 0);
-														PendingKeyUploadStorage.getInstance(activity).addPendingKey(delayedKey);
-														appConfigManager.setIAmInfected(true);
-														if (finalDelayedKeyAlreadyPresent) {
-															DP3T.stop(activity);
-															appConfigManager.setIAmInfectedIsResettable(true);
-														}
-														pendingIAmInfectedRequest.callback.onSuccess(null);
-														pendingIAmInfectedRequest = null;
-													}
+									@Override
+									public void onError(Throwable throwable) {
+										reportFailedIAmInfected(throwable);
+									}
+								});
+			} catch (IllegalStateException e) {
+				reportFailedIAmInfected(e);
+			}
+		};
 
-													@Override
-													public void onError(Throwable throwable) {
-														reportFailedIAmInfected(throwable);
-													}
-												});
-							} catch (IllegalStateException e) {
-								reportFailedIAmInfected(e);
-							}
-						}, e -> {
-							reportFailedIAmInfected(e);
-						});
+		Consumer<Exception> errorCallback = e -> {
+			reportFailedIAmInfected(e);
+		};
+		if (isGMS(activity)) {
+			GoogleExposureClient.getInstance(activity)
+					.getTemporaryExposureKeyHistory(activity, REQUEST_CODE_EXPORT_KEYS, successCallback, errorCallback);
+		} else if (isHMS(activity)) {
+			ContactShieldWrapper.getInstance(activity)
+					.getTemporaryExposureKeyHistory(activity, REQUEST_CODE_EXPORT_KEYS, successCallback, errorCallback);
+		}
+
 	}
 
 	private static void reportFailedIAmInfected(Throwable e) {
@@ -366,9 +394,12 @@ public class DP3T {
 
 		AppConfigManager appConfigManager = AppConfigManager.getInstance(context);
 		appConfigManager.setTracingEnabled(false);
+		if (isGMS(context)) {
+			GoogleExposureClient.getInstance(context).stop();
 
-		GoogleExposureClient.getInstance(context).stop();
-
+		}else if (isHMS(context)) {
+			ContactShieldWrapper.getInstance(context).stop();
+		}
 		SyncWorker.stopSyncWorker(context);
 		BroadcastHelper.sendUpdateAndErrorBroadcast(context);
 

@@ -27,20 +27,24 @@ import com.google.android.gms.nearby.exposurenotification.ExposureWindow;
 import com.google.android.gms.nearby.exposurenotification.ScanInstance;
 
 import org.dpppt.android.sdk.internal.AppConfigManager;
+import org.dpppt.android.sdk.internal.hms.ContactShieldWrapper;
 import org.dpppt.android.sdk.internal.logger.Logger;
 import org.dpppt.android.sdk.internal.storage.ExposureDayStorage;
 import org.dpppt.android.sdk.models.DayDate;
 import org.dpppt.android.sdk.models.ExposureDay;
+
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isGMS;
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isHMS;
 
 
 public class ExposureWindowMatchingWorker extends Worker {
 
 	private static final String TAG = "MatchingWorker";
 
+
 	public static void startMatchingWorker(Context context) {
 		WorkManager workManager = WorkManager.getInstance(context);
 		workManager.enqueue(OneTimeWorkRequest.from(ExposureWindowMatchingWorker.class));
-
 		Logger.d(TAG, "scheduled MatchingWorker");
 	}
 
@@ -55,7 +59,14 @@ public class ExposureWindowMatchingWorker extends Worker {
 		Context context = getApplicationContext();
 		List<ExposureWindow> exposureWindows = null;
 		try {
-			exposureWindows = GoogleExposureClient.getInstance(context).getExposureWindows();
+			if(isGMS(context)){
+				exposureWindows = GoogleExposureClient.getInstance(context).getExposureWindows();
+			}else if(isHMS(context)){
+				exposureWindows = ContactShieldWrapper.getInstance(context).getExposureWindows();
+			}else {
+				exposureWindows = new ArrayList<>();
+			}
+
 		} catch (Exception e) {
 			Logger.e(TAG, "error getting exposureWindows");
 			return Result.failure();

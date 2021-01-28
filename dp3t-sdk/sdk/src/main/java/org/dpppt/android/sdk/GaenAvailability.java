@@ -10,10 +10,33 @@
 package org.dpppt.android.sdk;
 
 public enum GaenAvailability {
-	/** Ready to go */
-	AVAILABLE,
-	/** Google Play Services need to be updated */
-	UPDATE_REQUIRED,
-	/** Google Play Services are not available */
-	UNAVAILABLE
+	/**
+	 * Ready to go
+	 */
+	GMS_AVAILABLE,
+	/**
+	 * Google Play Services need to be updated
+	 */
+	GMS_UPDATE_REQUIRED,
+	/**
+	 * Google Play Services are not available
+	 */
+	GMS_UNAVAILABLE,
+	/**
+	 * HMS Ready to go
+	 */
+	HMS_AVAILABLE,
+	/**
+	 * Huawei Play Services need to be updated
+	 */
+	HMS_UPDATE_REQUIRED,
+	/**
+	 * Huawei Play Services are not available
+	 */
+	HMS_UNAVAILABLE,
+
+	/**
+	 * Google and Huawei Play Services are both not available
+	 */
+	ALL_UNAVAILABLE
 }

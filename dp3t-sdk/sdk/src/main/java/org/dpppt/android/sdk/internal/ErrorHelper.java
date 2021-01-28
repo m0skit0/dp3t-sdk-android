@@ -85,7 +85,7 @@ public class ErrorHelper {
 		}
 
 		GaenAvailability gaenAvailability = GaenStateCache.getGaenAvailability();
-		if (gaenAvailability != null && gaenAvailability != GaenAvailability.AVAILABLE) {
+		if (gaenAvailability != null && gaenAvailability != GaenAvailability.GMS_AVAILABLE && gaenAvailability != GaenAvailability.HMS_AVAILABLE) {
 			errors.add(ErrorState.GAEN_NOT_AVAILABLE);
 		}
 

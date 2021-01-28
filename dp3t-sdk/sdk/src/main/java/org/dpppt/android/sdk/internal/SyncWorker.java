@@ -35,6 +35,7 @@ import org.dpppt.android.sdk.internal.backend.models.GaenKey;
 import org.dpppt.android.sdk.internal.history.HistoryDatabase;
 import org.dpppt.android.sdk.internal.history.HistoryEntry;
 import org.dpppt.android.sdk.internal.history.HistoryEntryType;
+import org.dpppt.android.sdk.internal.hms.ContactShieldWrapper;
 import org.dpppt.android.sdk.internal.logger.Logger;
 import org.dpppt.android.sdk.internal.nearby.GaenStateCache;
 import org.dpppt.android.sdk.internal.nearby.GaenStateHelper;
@@ -48,6 +49,8 @@ import org.dpppt.android.sdk.util.DateUtil;
 import okhttp3.ResponseBody;
 import retrofit2.Response;
 
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isGMS;
+import static org.dpppt.android.sdk.internal.hms.ApiAvailabilityCheckUtils.isHMS;
 import static org.dpppt.android.sdk.internal.util.Base64Util.toBase64;
 
 public class SyncWorker extends Worker {
@@ -161,7 +164,6 @@ public class SyncWorker extends Worker {
 
 			BackendBucketRepository backendBucketRepository =
 					new BackendBucketRepository(context, appConfig.getBucketBaseUrl(), bucketSignaturePublicKey);
-			GoogleExposureClient googleExposureClient = GoogleExposureClient.getInstance(context);
 
 			if (appConfigManager.getLastSynCallTime() <= currentTime - SYNC_INTERVAL) {
 				try {
@@ -186,7 +188,12 @@ public class SyncWorker extends Worker {
 						Logger.d(TAG,
 								"provideDiagnosisKeys with size " + file.length());
 						appConfigManager.setLastSyncCallTime(currentTime);
-						googleExposureClient.provideDiagnosisKeys(fileList);
+						if(isGMS(context)){
+							GoogleExposureClient.getInstance(context).provideDiagnosisKeys(fileList);
+						}else if(isHMS(context)){
+							ContactShieldWrapper.getInstance(context).provideDiagnosisKeys(fileList);
+						}
+
 					} else {
 						appConfigManager.setLastSyncCallTime(currentTime);
 					}
@@ -251,8 +258,14 @@ public class SyncWorker extends Worker {
 					}
 					GaenKey gaenKey = null;
 					if (!pendingKey.isFake()) {
-						List<TemporaryExposureKey> keys =
-								GoogleExposureClient.getInstance(context).getTemporaryExposureKeyHistorySynchronous();
+						List<TemporaryExposureKey> keys;
+						if (isGMS(context)) {
+							keys = GoogleExposureClient.getInstance(context).getTemporaryExposureKeyHistorySynchronous();
+						} else if (isHMS(context)) {
+							keys = ContactShieldWrapper.getInstance(context).getTemporaryExposureKeyHistorySynchronous();
+						}else {
+							keys = new ArrayList<>();
+						}
 
 						for (TemporaryExposureKey key : keys) {
 							if (key.getRollingStartIntervalNumber() == pendingKey.getRollingStartNumber()) {

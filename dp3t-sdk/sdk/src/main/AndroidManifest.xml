@@ -46,6 +46,9 @@
 			android:exported="false">
 		</receiver>
 
+		<service android:name=".internal.hms.BackgroundContackShieldIntentService"
+			android:enabled="true"
+			android:exported="true"/>
 	</application>
 
 </manifest>
