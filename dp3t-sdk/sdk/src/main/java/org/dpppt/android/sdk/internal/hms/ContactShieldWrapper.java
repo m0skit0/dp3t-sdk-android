@@ -69,13 +69,18 @@ public class ContactShieldWrapper {
     }
 
     public void start(Activity activity, int resolutionRequestCode, Runnable successCallback, Consumer<Exception> errorCallback) {
+        if (!(mContextWeakRef.get() instanceof Activity)) {
+            mContactShieldEngine = ContactShield.getContactShieldEngine(activity);
+            mContextWeakRef.clear();
+            mContextWeakRef = new WeakReference<>(activity);
+        }
         mContactShieldEngine.startContactShield(ContactShieldSetting.DEFAULT)
                 .addOnSuccessListener(nothing -> {
                     Logger.i(TAG, "start: started successfully");
                     successCallback.run();
                 })
                 .addOnFailureListener(e -> {
-                    if (e instanceof com.huawei.hms.common.ResolvableApiException) {
+                    if (e instanceof ResolvableApiException) {
                         ResolvableApiException apiException = (ResolvableApiException) e;
                         if (apiException.getResolution() != null) {
                             try {
@@ -86,7 +91,7 @@ public class ContactShieldWrapper {
                                 Logger.e(TAG, "start: error calling startResolutionForResult()");
                             }
                         }
-                    } else if (e instanceof com.huawei.hms.common.ApiException&&((ApiException)e).getStatusCode() == StatusCode.STATUS_MISSING_PERMISSION_LOCATION) {
+                    } else if (e instanceof ApiException&&((ApiException)e).getStatusCode() == StatusCode.STATUS_MISSING_PERMISSION_LOCATION) {
                         Logger.i(TAG, "start: resolution required");
                         initDialog(activity);
                         return;
@@ -123,13 +128,18 @@ public class ContactShieldWrapper {
 
     public void getTemporaryExposureKeyHistory(Activity activity, int resolutionRequestCode,
                                                OnSuccessListener<List<TemporaryExposureKey>> successCallback, Consumer<Exception> errorCallback) {
+        if (!(mContextWeakRef.get() instanceof Activity)) {
+            mContactShieldEngine = ContactShield.getContactShieldEngine(activity);
+            mContextWeakRef.clear();
+            mContextWeakRef = new WeakReference<>(activity);
+        }
         mContactShieldEngine.getPeriodicKey()
                 .addOnSuccessListener(list -> {
                     Logger.d(TAG, "getTemporaryExposureKeyHistory: success");
                     successCallback.onSuccess(getTemporaryExposureKeyList(list));
                 })
                 .addOnFailureListener(e -> {
-                    if (e instanceof com.huawei.hms.common.ResolvableApiException) {
+                    if (e instanceof ResolvableApiException) {
                         ResolvableApiException apiException = (ResolvableApiException) e;
                         if (apiException.getResolution() != null) {
                             try {
@@ -352,10 +362,10 @@ public class ContactShieldWrapper {
         for(ScanInfo item:scanInfos){
             ScanInstance scanInstance =
                     new ScanInstance.Builder()
-                    .setTypicalAttenuationDb(item.getAverageAttenuation())
-                    .setMinAttenuationDb(item.getMinimumAttenuation())
-                    .setSecondsSinceLastScan(item.getSecondsSinceLastScan())
-                    .build();
+                            .setTypicalAttenuationDb(item.getAverageAttenuation())
+                            .setMinAttenuationDb(item.getMinimumAttenuation())
+                            .setSecondsSinceLastScan(item.getSecondsSinceLastScan())
+                            .build();
             scanInstanceList.add(scanInstance);
         }
         return scanInstanceList;
